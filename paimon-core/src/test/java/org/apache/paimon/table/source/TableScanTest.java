@@ -18,6 +18,9 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.fs.FileIOFinder;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
@@ -33,9 +36,11 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TraceableFileIO;
 
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -582,22 +587,28 @@ public class TableScanTest extends ScannerTestBase {
         assertThat(result2.size()).isEqualTo(2);
         assertThat(result2).allMatch(s -> s.contains("2|"));
 
+        // Query a non-existent partition should return empty result
+        Map<String, String> nonExistentSpec = new HashMap<>();
+        nonExistentSpec.put("pt", "999");
+        TableScan.Plan planNonExistent =
+                table.newScan().withPartitionFilter(nonExistentSpec).plan();
+        assertThat(planNonExistent.splits()).isEmpty();
+
         write.close();
         commit.close();
     }
 
     @Test
     public void testBucketFilter() throws Exception {
-        // Create append-only table with multiple buckets directly
+        // Create append-only table with multiple buckets
         Options conf = new Options();
-        conf.set(org.apache.paimon.CoreOptions.BUCKET, 3);
-        conf.set(org.apache.paimon.CoreOptions.BUCKET_KEY, "a");
+        conf.set(CoreOptions.BUCKET, 3);
+        conf.set(CoreOptions.BUCKET_KEY, "a");
 
         // Use a new path to avoid schema conflict with the default primary key table
-        java.nio.file.Path newTempDir = java.nio.file.Files.createTempDirectory("junit");
-        tablePath = new org.apache.paimon.fs.Path(
-                org.apache.paimon.utils.TraceableFileIO.SCHEME + "://" + newTempDir.toString());
-        fileIO = org.apache.paimon.fs.FileIOFinder.find(tablePath);
+        tempDir = Files.createTempDirectory("junit");
+        tablePath = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
+        fileIO = FileIOFinder.find(tablePath);
         table = createFileStoreTable(false, conf, tablePath);
 
         StreamTableWrite write = table.newWrite(commitUser);
